@@ -23,8 +23,8 @@ def memoize(fctn):
     return memo
 
 
-dnsdb = '/root/pdns.sqlite'
-#dnsdb = '/var/spool/powerdns/pdns.sqlite'
+#dnsdb = '/root/pdns.sqlite'
+dnsdb = '/var/spool/powerdns/pdns.sqlite'
 conn_str = 'sqlite://%s' % dnsdb
 connection = connectionForURI(conn_str)
 sqlhub.processConnection = connection
@@ -80,21 +80,24 @@ def process_all(instances):
     for array_instance in arrays:
         fqdn_parts = array_instance.tags['fqdn'].split('.')
         array_type = fqdn_parts.pop(0)[:-3]
+        deployment = array_instance.tags['deployment']
         array_type = array_type.replace('array-','')
         fqdn_parts.insert(0, '%sXX' % array_type)
         fqdn = '.'.join(fqdn_parts)
-        atypes = array_types.setdefault(array_type, [])
+        atypedeploy = array_types.setdefault(deployment, {})
+        atypes = atypedeploy.setdefault(array_type, [])
         atypes.append((fqdn, array_instance))
 
-    for k,v in array_types.iteritems():
-        for e,(fqdn,array_instance) in enumerate(v):
-            e += 1
-            e = str(e).zfill(2)
-            fqdn = fqdn.replace('XX', e)
-            result = _process(fqdn, array_instance.tags['domain_base'],
-                     array_instance.dns_name)
-            if result:
-                no_changes.append(result)
+    for deploy,atypesdict in array_types.iteritems():
+        for atype,v in atypesdict.iteritems():
+            for e,(fqdn,array_instance) in enumerate(v):
+                e += 1
+                e = str(e).zfill(2)
+                fqdn = fqdn.replace('XX', e)
+                result = _process(fqdn, array_instance.tags['domain_base'],
+                         array_instance.dns_name)
+                if result:
+                    no_changes.append(result)
 
 
 
@@ -107,10 +110,12 @@ def process_all(instances):
 
 
 
+def do_update():
+    process_all(gatherinstances())
+
 
 
 
 if __name__ == '__main__':
-
-    process_all(gatherinstances())
+    do_update()
 
