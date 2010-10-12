@@ -17,7 +17,10 @@ setup(name='powerupdater',
       packages=find_packages(exclude=['ez_setup', 'examples', 'tests']),
       include_package_data=True,
       zip_safe=False,
+      scripts = ['bin/powerupdater'],
       install_requires=[
+          'boto>=2.0b3',
+          'sqlobject>0.12.2',
           # -*- Extra requirements: -*-
       ],
       entry_points="""
