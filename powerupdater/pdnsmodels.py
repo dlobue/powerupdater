@@ -28,7 +28,7 @@ class record(SQLObject):
     name = StringCol(length=255)
     type = StringCol(length=6)
     content = StringCol(length=255)
-    ttl = IntCol(default=600)
+    ttl = IntCol(default=120)
     prio = IntCol(default=None)
     change_date = IntCol()
     nameIndex = DatabaseIndex(name)
