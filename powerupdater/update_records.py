@@ -127,8 +127,17 @@ def process_all(instances):
 
 
 
+def created_listener(inst, kwargs, post_funcs):
+    print("New server found - fqdn: %s" % inst.name)
+
+def destroy_listener(inst, post_funcs):
+    print("Deleting record for server - fqdn: %s" % inst.name)
+
 
 def do_update():
+    #from sqlobject.events import listen, RowDestroySignal, RowCreatedSignal
+    #listen(created_listener, record, RowCreatedSignal)
+    #listen(destroy_listener, record, RowDestroySignal)
     process_all(gatherinstances())
 
 
