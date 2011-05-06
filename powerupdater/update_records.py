@@ -3,6 +3,7 @@ from time import time
 
 from sqlobject import connectionForURI, sqlhub, SQLObjectNotFound
 import boto
+import boto.ec2
 from ConfigParser import SafeConfigParser
 from os.path import expanduser
 
@@ -32,8 +33,20 @@ sqlhub.processConnection = connection
 def get_credentials():
     confp = SafeConfigParser()
     confp.read(expanduser('~/.s3cfg'))
-    return (confp.get('default', 'access_key'),
-                     confp.get('default', 'secret_key'))
+    return {'aws_access_key_id': confp.get('default', 'access_key'),
+            'aws_secret_access_key': confp.get('default', 'secret_key')}
+
+
+def trampoline(*instance_lists):
+    instance_lists = iter(instance_lists)
+    while 1:
+        instances = iter(instance_lists.next())
+        while 1:
+            try:
+                yield instances.next()
+            except StopIteration:
+                break
+
 
 
 @memoize
@@ -43,10 +56,15 @@ def get_rootdn_record(name):
     except SQLObjectNotFound:
         return domain(name=name, type=MASTER)
 
+
 def gatherinstances():
-    conn = boto.connect_ec2(*get_credentials())
-    instances = conn.get_all_instances()
-    return instances
+    regions = boto.ec2.regions(**get_credentials())
+    regions = (region.connect(**get_credentials()) for region in regions)
+
+    instances = (region.get_all_instances() for region in regions)
+
+    return trampoline(*instances)
+
 
 def process_all(instances):
     started_at = int(time())
