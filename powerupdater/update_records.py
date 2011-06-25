@@ -1,7 +1,7 @@
 
 from time import time
 
-from sqlobject import connectionForURI, sqlhub, SQLObjectNotFound
+from sqlobject import connectionForURI, sqlhub, SQLObjectNotFound, AND
 import boto
 import boto.ec2
 from ConfigParser import SafeConfigParser
@@ -119,7 +119,7 @@ def process_all(instances):
 
 
 
-    not_updated = record.select(record.q.change_date<started_at, record.q.type == CNAME)
+    not_updated = record.select(AND(record.q.change_date<started_at, record.q.type == CNAME))
 
     for rcrd in not_updated:
         if rcrd not in no_changes:
