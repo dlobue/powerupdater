@@ -4,12 +4,13 @@ from time import time
 
 CNAME = 'CNAME'
 MASTER = 'MASTER'
+NS = 'NS'
+SOA = 'SOA'
 
 
 class domain(SQLObject):
     class sqlmeta:
         table = 'domains'
-        #lazyUpdate = True
 
     name = StringCol(length=255, notNone=True)
     master = StringCol(length=128, default=None)
@@ -22,7 +23,6 @@ class domain(SQLObject):
 class record(SQLObject):
     class sqlmeta:
         table = 'records'
-        #lazyUpdate = True
 
     domain = ForeignKey('domain', cascade=True)
     name = StringCol(length=255)
@@ -38,11 +38,11 @@ class record(SQLObject):
         kwargs['change_date'] = int(time())
         return self.set(**kwargs)
 
-#class supermaster(SQLObject):
-    #    class sqlmeta:
-        #        table = 'supermasters'
+class supermaster(SQLObject):
+   class sqlmeta:
+       table = 'supermasters'
 
-#    ip = StringCol(length=25, notNone=True)
-#    nameserver = StringCol(length=255, notNone=True)
-#    account = StringCol(length=40)
+   ip = StringCol(length=25, notNone=True)
+   nameserver = StringCol(length=255, notNone=True)
+   account = StringCol(length=40)
 

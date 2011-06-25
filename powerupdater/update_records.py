@@ -1,14 +1,16 @@
 
 from time import time
-
-from sqlobject import connectionForURI, sqlhub, SQLObjectNotFound, AND
-import boto
-import boto.ec2
 from ConfigParser import SafeConfigParser
 from os.path import expanduser
-
-from pdnsmodels import record, domain, CNAME, MASTER
 from functools import wraps
+import logging
+logger = logging.getLogger(__name__)
+
+from sqlobject import connectionForURI, sqlhub, SQLObjectNotFound, AND, SQLObjectIntegrityError
+import boto
+import boto.ec2
+
+from pdnsmodels import record, domain, CNAME, MASTER, SOA
 
 
 def memoize(fctn):
@@ -68,6 +70,7 @@ def gatherinstances():
 
 def process_all(instances):
     started_at = int(time())
+    updated = False
 
     instances = map(lambda x: x.instances[0], instances)
     instances = filter(lambda x: x.tags, instances)
@@ -119,24 +122,59 @@ def process_all(instances):
 
 
 
+    if len(no_changes) != len(instances):
+        updated = True
+
     not_updated = record.select(AND(record.q.change_date<started_at, record.q.type == CNAME))
 
     for rcrd in not_updated:
         if rcrd not in no_changes:
             rcrd.destroySelf()
+            updated = True
+
+    if updated:
+        #TODO: account for multiple domain bases
+        try:
+            soa = record.selectBy(type=SOA).getOne()
+        except SQLObjectNotFound:
+            logger.debug("No SOA record found")
+            return None
+        except SQLObjectIntegrityError:
+            logger.warn("Found more than one SOA record.")
+            return None
+
+        soa_contents = soa.content.split()
+        if len(soa_contents) < 2:
+            logger.error("Incomplete SOA record: %s" % soa.content)
+            return None
+
+        try:
+            serial = int(soa_contents[2]) + 1
+        except IndexError:
+            serial = 1
+        except ValueError:
+            logger.error("Invalid value for SOA record serial number! Got: %r" % soa_contents[2])
+            return None
+
+        soa_contents[2] = serial
+        soa.content = ' '.join(soa_contents)
 
 
 
 def created_listener(inst, kwargs, post_funcs):
-    print("New server found - fqdn: %s" % inst.name)
+    logger.info("New server found - fqdn: %s" % inst.name)
+
+def updated_listener(inst, post_funcs):
+    logger.info("Updating record for server - fqdn: %s" % inst.name)
 
 def destroy_listener(inst, post_funcs):
-    print("Deleting record for server - fqdn: %s" % inst.name)
+    logger.info("Deleting record for server - fqdn: %s" % inst.name)
 
 
 def do_update():
     #from sqlobject.events import listen, RowDestroySignal, RowCreatedSignal
     #listen(created_listener, record, RowCreatedSignal)
+    #listen(updated_listener, record, RowUpdatedSignal)
     #listen(destroy_listener, record, RowDestroySignal)
     process_all(gatherinstances())
 
