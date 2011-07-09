@@ -47,7 +47,6 @@ def trampoline(*instance_lists):
                 break
 
 
-
 @memoize
 def get_rootdn_record(name):
     try:
@@ -115,7 +114,6 @@ def process_all(instances):
                     no_changes.append(result)
 
 
-
     not_updated = record.select(AND(record.q.change_date<started_at, record.q.type == CNAME))
 
     for rcrd in not_updated:
@@ -180,8 +178,6 @@ def do_update():
     listen(updated_listener, record, RowUpdatedSignal)
     listen(destroy_listener, record, RowDestroySignal)
     process_all(gatherinstances())
-
-
 
 
 if __name__ == '__main__':
