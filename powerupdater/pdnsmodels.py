@@ -38,6 +38,13 @@ class record(SQLObject):
         kwargs['change_date'] = int(time())
         return self.set(**kwargs)
 
+    _updated = False
+    @classmethod
+    def updated(cls, updated=None):
+        if updated and not cls._updated:
+            cls._updated = True
+        return cls._updated
+
 class supermaster(SQLObject):
    class sqlmeta:
        table = 'supermasters'

@@ -3,10 +3,12 @@ from time import time
 from ConfigParser import SafeConfigParser
 from os.path import expanduser
 from functools import wraps
+from sys import argv
 import logging
 logger = logging.getLogger(__name__)
 
-from sqlobject import connectionForURI, sqlhub, SQLObjectNotFound, AND, SQLObjectIntegrityError
+from sqlobject import connectionForURI, sqlhub, SQLObjectNotFound, AND
+from sqlobject.main import SQLObjectIntegrityError
 import boto
 import boto.ec2
 
@@ -26,8 +28,10 @@ def memoize(fctn):
     return memo
 
 
-#dnsdb = '/root/pdns.sqlite'
-dnsdb = '/var/spool/powerdns/pdns.sqlite'
+try:
+    dnsdb = argv[1]
+except IndexError:
+    dnsdb = '/var/spool/powerdns/pdns.sqlite'
 conn_str = 'sqlite://%s' % dnsdb
 connection = connectionForURI(conn_str)
 sqlhub.processConnection = connection
@@ -70,7 +74,6 @@ def gatherinstances():
 
 def process_all(instances):
     started_at = int(time())
-    updated = False
 
     instances = map(lambda x: x.instances[0], instances)
     instances = filter(lambda x: x.tags, instances)
@@ -122,17 +125,13 @@ def process_all(instances):
 
 
 
-    if len(no_changes) != len(instances):
-        updated = True
-
     not_updated = record.select(AND(record.q.change_date<started_at, record.q.type == CNAME))
 
     for rcrd in not_updated:
         if rcrd not in no_changes:
             rcrd.destroySelf()
-            updated = True
 
-    if updated:
+    if record.updated():
         #TODO: account for multiple domain bases
         try:
             soa = record.selectBy(type=SOA).getOne()
@@ -156,31 +155,39 @@ def process_all(instances):
             logger.error("Invalid value for SOA record serial number! Got: %r" % soa_contents[2])
             return None
 
-        soa_contents[2] = serial
-        soa.content = ' '.join(soa_contents)
+        try:
+            soa_contents[2] = str(serial)
+        except IndexError:
+            soa_contents.append( str(serial) )
+        soa.update(content=' '.join(soa_contents))
 
 
 
 def created_listener(inst, kwargs, post_funcs):
+    inst.updated(True)
     logger.info("New server found - fqdn: %s" % inst.name)
 
 def updated_listener(inst, post_funcs):
-    logger.info("Updating record for server - fqdn: %s" % inst.name)
+    inst.updated(True)
+    logger.info("Updating %s record for server - fqdn: %s" % (inst.type, inst.name))
 
 def destroy_listener(inst, post_funcs):
+    inst.updated(True)
     logger.info("Deleting record for server - fqdn: %s" % inst.name)
 
 
 def do_update():
-    #from sqlobject.events import listen, RowDestroySignal, RowCreatedSignal
-    #listen(created_listener, record, RowCreatedSignal)
-    #listen(updated_listener, record, RowUpdatedSignal)
-    #listen(destroy_listener, record, RowDestroySignal)
+    from sqlobject.events import listen, RowDestroySignal, RowCreatedSignal, RowUpdatedSignal
+    listen(created_listener, record, RowCreatedSignal)
+    listen(updated_listener, record, RowUpdatedSignal)
+    listen(destroy_listener, record, RowDestroySignal)
     process_all(gatherinstances())
 
 
 
 
 if __name__ == '__main__':
+    logger.addHandler(logging.StreamHandler())
+    logger.setLevel(logging.DEBUG)
     do_update()
 
