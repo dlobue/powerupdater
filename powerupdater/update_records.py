@@ -123,34 +123,38 @@ def process_all(instances):
             rcrd.destroySelf()
 
     if record.updated():
-        #TODO: account for multiple domain bases
-        try:
-            soa = record.selectBy(type=SOA).getOne()
-        except SQLObjectNotFound:
-            logger.debug("No SOA record found")
-            return None
-        except SQLObjectIntegrityError:
-            logger.warn("Found more than one SOA record.")
-            return None
+        for domain_record in domain.select():
+            update_domain_soa(domain_record)
 
-        soa_contents = soa.content.split()
-        if len(soa_contents) < 2:
-            logger.error("Incomplete SOA record: %s" % soa.content)
-            return None
 
-        try:
-            serial = int(soa_contents[2]) + 1
-        except IndexError:
-            serial = 1
-        except ValueError:
-            logger.error("Invalid value for SOA record serial number! Got: %r" % soa_contents[2])
-            return None
+def update_domain_soa(domain_record):
+    try:
+        soa = record.selectBy(domain=domain_record, type=SOA).getOne()
+    except SQLObjectNotFound:
+        logger.debug("No SOA record found")
+        return None
+    except SQLObjectIntegrityError:
+        logger.warn("Found more than one SOA record.")
+        return None
 
-        try:
-            soa_contents[2] = str(serial)
-        except IndexError:
-            soa_contents.append( str(serial) )
-        soa.update(content=' '.join(soa_contents))
+    soa_contents = soa.content.split()
+    if len(soa_contents) < 2:
+        logger.error("Incomplete SOA record: %s" % soa.content)
+        return None
+
+    try:
+        serial = int(soa_contents[2]) + 1
+    except IndexError:
+        serial = 1
+    except ValueError:
+        logger.error("Invalid value for SOA record serial number! Got: %r" % soa_contents[2])
+        return None
+
+    try:
+        soa_contents[2] = str(serial)
+    except IndexError:
+        soa_contents.append( str(serial) )
+    soa.update(content=' '.join(soa_contents))
 
 
 
@@ -160,7 +164,10 @@ def created_listener(inst, kwargs, post_funcs):
 
 def updated_listener(inst, post_funcs):
     inst.updated(True)
-    logger.info("Updating %s record for server - fqdn: %s" % (inst.type, inst.name))
+    if inst.type == SOA:
+        logger.info("Updated the SOA record for the domain %s" % inst.name)
+    else:
+        logger.info("Updating record for server - fqdn: %s" % inst.name)
 
 def destroy_listener(inst, post_funcs):
     inst.updated(True)
