@@ -1,7 +1,6 @@
 
 from time import time
 from ConfigParser import SafeConfigParser
-from os.path import expanduser
 from functools import wraps
 from sys import argv
 import logging
@@ -36,12 +35,6 @@ conn_str = 'sqlite://%s' % dnsdb
 connection = connectionForURI(conn_str)
 sqlhub.processConnection = connection
 
-def get_credentials():
-    confp = SafeConfigParser()
-    confp.read(expanduser('~/.s3cfg'))
-    return {'aws_access_key_id': confp.get('default', 'access_key'),
-            'aws_secret_access_key': confp.get('default', 'secret_key')}
-
 
 def trampoline(*instance_lists):
     instance_lists = iter(instance_lists)
@@ -64,9 +57,7 @@ def get_rootdn_record(name):
 
 
 def gatherinstances():
-    regions = boto.ec2.regions(**get_credentials())
-    regions = (region.connect(**get_credentials()) for region in regions)
-
+    regions = (region.connect() for region in boto.ec2.regions())
     instances = (region.get_all_instances() for region in regions)
 
     return trampoline(*instances)
