@@ -75,6 +75,7 @@ def process_record(rrset, name, value):
             return rrset
 
         logger.info("Updating: %s" % name)
+        logger.debug("Name: %s, Old values: %r, New value: %r" % (name, record.resource_records, value))
         rrset = delete_record(rrset, record)
 
     c = rrset.add_change('CREATE', name, 'CNAME', DEFAULT_TTL)
@@ -91,7 +92,7 @@ def gatherinstances():
 
 def process_all(instances):
     instances = map(lambda x: x.instances[0], instances)
-    instances = filter(lambda x: x.tags, instances)
+    instances = filter(lambda x: x.tags and x.dns_name, instances)
 
     domain_bases = set(x.tags['domain_base'] for x in instances)
 
