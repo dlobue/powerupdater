@@ -1,17 +1,18 @@
 
-from time import time
-from ConfigParser import SafeConfigParser
 from functools import wraps
-from sys import argv
+from pprint import pformat
 import logging
 logger = logging.getLogger(__name__)
 
-from sqlobject import connectionForURI, sqlhub, SQLObjectNotFound, AND
-from sqlobject.main import SQLObjectIntegrityError
 import boto
 import boto.ec2
 
-from pdnsmodels import record, domain, CNAME, MASTER, SOA
+
+DEFAULT_TTL = 120
+DEFAULT_TYPE = 'CNAME'
+
+
+route53 = boto.connect_route53()
 
 
 def memoize(fctn):
@@ -27,15 +28,6 @@ def memoize(fctn):
     return memo
 
 
-try:
-    dnsdb = argv[1]
-except IndexError:
-    dnsdb = '/var/spool/powerdns/pdns.sqlite'
-conn_str = 'sqlite://%s' % dnsdb
-connection = connectionForURI(conn_str)
-sqlhub.processConnection = connection
-
-
 def trampoline(*instance_lists):
     instance_lists = iter(instance_lists)
     while 1:
@@ -48,12 +40,47 @@ def trampoline(*instance_lists):
 
 
 @memoize
-def get_rootdn_record(name):
-    try:
-        return domain.selectBy(name=name).getOne()
-    except SQLObjectNotFound:
-        return domain(name=name, type=MASTER)
+def get_records(name):
+    zones = route53.get_all_hosted_zones()['ListHostedZonesResponse']['HostedZones']
+    name = name.strip('.')
+    zones = filter(lambda x: x['Name'].strip('.') == name, zones)
+    if zones:
+        zone = zones[0]
+    else:
+        response = route53.create_hosted_zone(name)
+        zone = response['CreateHostedZoneResponse']['HostedZone']
+    return route53.get_all_rrsets(zone['Id'].replace('/hostedzone/', ''))
 
+
+def delete_record(rrset, record):
+    c = rrset.add_change('DELETE', record.name, record.type, record.ttl)
+    for v in record.resource_records:
+        c.add_value(v)
+    return rrset
+
+def find_record(rrset, name):
+    name = name.strip('.')
+    return filter(lambda x: x.name.strip('.') == name, rrset)[0]
+
+def process_record(rrset, name, value):
+    name = name.strip('.')
+    try:
+        record = find_record(rrset, name)
+    except IndexError:
+        logger.info("New: %s" % name)
+        pass
+    else:
+        if record.resource_records[0] == value:
+            logger.debug("Unchanged: %s" % name)
+            return rrset
+
+        logger.info("Updating: %s" % name)
+        rrset = delete_record(rrset, record)
+
+    c = rrset.add_change('CREATE', name, 'CNAME', DEFAULT_TTL)
+    c.add_value(value)
+
+    return rrset
 
 def gatherinstances():
     regions = (region.connect() for region in boto.ec2.regions())
@@ -63,30 +90,21 @@ def gatherinstances():
 
 
 def process_all(instances):
-    started_at = int(time())
-
     instances = map(lambda x: x.instances[0], instances)
     instances = filter(lambda x: x.tags, instances)
 
-    def _process(fqdn, domain_base, public_dns_name):
-        try:
-            sr = record.selectBy(name=fqdn).getOne()
-            if sr.content != public_dns_name:
-                sr.update(content=public_dns_name)
-            else:
-                return sr #record already existed, and didn't get updated, so
-                          # change_date will still be older than started_at.
-                          # return it for exclusion in stale record processing.
-        except SQLObjectNotFound:
-            sr = record(domain=get_rootdn_record(domain_base),
-                        name=fqdn, type=CNAME,
-                        content=public_dns_name, change_date=int(time()))
+    domain_bases = set(x.tags['domain_base'] for x in instances)
+
+    unseen = {}
+    for d in domain_bases:
+        unseen[d] = set(r.name.strip('.') for r in get_records(d) if r.type == 'CNAME')
 
 
-    no_changes = filter(lambda x: x,
-                        map(lambda x: _process(x.tags['fqdn'],
-                                               x.tags['domain_base'],
-                                               x.dns_name), instances))
+    for instance in instances:
+        unseen[instance.tags['domain_base']].discard(instance.tags['fqdn'])
+        rrset = get_records(instance.tags['domain_base'])
+        process_record(rrset, instance.tags['fqdn'], instance.dns_name)
+
 
     arrays = filter(lambda x: x.tags['fqdn'].startswith('array-'), instances)
     array_types = {}
@@ -105,83 +123,40 @@ def process_all(instances):
     for deploy,atypesdict in array_types.iteritems():
         for atype,v in atypesdict.iteritems():
             for e,(fqdn,array_instance) in enumerate(v):
-                e += 1
-                e = str(e).zfill(2)
+                e = str(e+1).zfill(2)
                 fqdn = fqdn.replace('XX', e)
-                result = _process(fqdn, array_instance.tags['domain_base'],
-                         array_instance.dns_name)
-                if result:
-                    no_changes.append(result)
 
-
-    not_updated = record.select(AND(record.q.change_date<started_at, record.q.type == CNAME))
-
-    for rcrd in not_updated:
-        if rcrd not in no_changes:
-            rcrd.destroySelf()
-
-    if record.updated():
-        for domain_record in domain.select():
-            update_domain_soa(domain_record)
-
-
-def update_domain_soa(domain_record):
-    try:
-        soa = record.selectBy(domain=domain_record, type=SOA).getOne()
-    except SQLObjectNotFound:
-        logger.debug("No SOA record found")
-        return None
-    except SQLObjectIntegrityError:
-        logger.warn("Found more than one SOA record.")
-        return None
-
-    soa_contents = soa.content.split()
-    if len(soa_contents) < 2:
-        logger.error("Incomplete SOA record: %s" % soa.content)
-        return None
-
-    try:
-        serial = int(soa_contents[2]) + 1
-    except IndexError:
-        serial = 1
-    except ValueError:
-        logger.error("Invalid value for SOA record serial number! Got: %r" % soa_contents[2])
-        return None
-
-    try:
-        soa_contents[2] = str(serial)
-    except IndexError:
-        soa_contents.append( str(serial) )
-    soa.update(content=' '.join(soa_contents))
+                unseen[array_instance.tags['domain_base']].discard(fqdn)
+                rrset = get_records(array_instance.tags['domain_base'])
+                process_record(rrset, fqdn, array_instance.dns_name)
 
 
 
-def created_listener(inst, kwargs, post_funcs):
-    inst.updated(True)
-    logger.info("New server found - fqdn: %s" % inst.name)
+    for d,records in unseen.iteritems():
+        rrset = get_records(d)
+        for rname in records:
+            logger.info("Deleting: %s" % rname)
+            record = find_record(rrset, rname)
+            delete_record(rrset, record)
 
-def updated_listener(inst, post_funcs):
-    inst.updated(True)
-    if inst.type == SOA:
-        logger.info("Updated the SOA record for the domain %s" % inst.name)
-    else:
-        logger.info("Updating record for server - fqdn: %s" % inst.name)
+    for d in domain_bases:
+        rrset = get_records(d)
+        if rrset.changes:
+            logger.info("committing changes for domain base: %s" % d)
+            logger.debug(pformat(rrset.changes))
+            rrset.commit()
 
-def destroy_listener(inst, post_funcs):
-    inst.updated(True)
-    logger.info("Deleting record for server - fqdn: %s" % inst.name)
 
 
 def do_update():
-    from sqlobject.events import listen, RowDestroySignal, RowCreatedSignal, RowUpdatedSignal
-    listen(created_listener, record, RowCreatedSignal)
-    listen(updated_listener, record, RowUpdatedSignal)
-    listen(destroy_listener, record, RowDestroySignal)
     process_all(gatherinstances())
 
 
 if __name__ == '__main__':
+    from time import time
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.DEBUG)
+    t = time()
     do_update()
+    print('took %f seconds to run' % (time() - t))
 
