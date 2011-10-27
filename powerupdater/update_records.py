@@ -111,21 +111,29 @@ def process_all(instances):
     array_types = {}
 
     for array_instance in arrays:
-        fqdn_parts = array_instance.tags['fqdn'].split('.')
-        array_type = fqdn_parts.pop(0)[:-3]
         deployment = array_instance.tags['deployment']
-        array_type = array_type.replace('array-','')
-        fqdn_parts.insert(0, '%sXX' % array_type)
-        fqdn = '.'.join(fqdn_parts)
+
+        fqdn = array_instance.tags['fqdn']
+        fqdn_base = fqdn[fqdn.index('.'):]
+
+        if 'type' in array_instance.tags:
+            array_type = array_instance.tags['type']
+        else:
+            array_type = fqdn[:fqdn.index('.')][:-3]
+            array_type = array_type.replace('array-','')
+
+        fqdn_alias = array_type + 'XX' + fqdn_base
+
         atypedeploy = array_types.setdefault(deployment, {})
         atypes = atypedeploy.setdefault(array_type, [])
-        atypes.append((fqdn, array_instance))
+        atypes.append((fqdn_alias, array_instance))
 
     for deploy,atypesdict in array_types.iteritems():
         for atype,v in atypesdict.iteritems():
-            for e,(fqdn,array_instance) in enumerate(v):
+            v = sorted(v, key=lambda x: x[1].launch_time)
+            for e,(fqdn_alias,array_instance) in enumerate(v):
                 e = str(e+1).zfill(2)
-                fqdn = fqdn.replace('XX', e)
+                fqdn = fqdn_alias.replace('XX', e)
 
                 unseen[array_instance.tags['domain_base']].discard(fqdn)
                 rrset = get_records(array_instance.tags['domain_base'])
