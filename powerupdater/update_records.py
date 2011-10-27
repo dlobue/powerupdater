@@ -92,7 +92,7 @@ def gatherinstances():
 
 def process_all(instances):
     instances = map(lambda x: x.instances[0], instances)
-    instances = filter(lambda x: x.tags and x.dns_name, instances)
+    instances = filter(lambda x: x.tags and x.dns_name and all((y in x.tags for y in ('domain_base', 'fqdn', 'deployment'))), instances)
 
     domain_bases = set(x.tags['domain_base'] for x in instances)
 
