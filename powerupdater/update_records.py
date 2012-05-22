@@ -1,6 +1,7 @@
 
 from functools import wraps
 from pprint import pformat
+from collections import Iterable
 import logging
 logger = logging.getLogger(__name__)
 
@@ -28,15 +29,26 @@ def memoize(fctn):
     return memo
 
 
-def trampoline(*instance_lists):
-    instance_lists = iter(instance_lists)
+def trampoline(*list_of_lists):
+    stack = [list_of_lists]
+    iteree = iter(stack)
     while 1:
-        instances = iter(instance_lists.next())
-        while 1:
+        try:
+            item = iteree.next()
+        except StopIteration:
             try:
-                yield instances.next()
-            except StopIteration:
+                iteree = iter(stack.pop())
+                continue
+            except IndexError:
                 break
+
+        if isinstance(item, Iterable) and not isinstance(item, basestring):
+            stack.append(iteree)
+            iteree = iter(item)
+            continue
+        yield item
+
+
 
 
 @memoize
@@ -85,13 +97,13 @@ def process_record(rrset, name, value):
 
 def gatherinstances():
     regions = (region.connect() for region in boto.ec2.regions())
-    instances = (region.get_all_instances() for region in regions)
+    reservations = (region.get_all_instances() for region in regions)
+    instances = (reservation.instances for reservation in trampoline(reservations))
 
-    return trampoline(*instances)
+    return trampoline(instances)
 
 
 def process_all(instances):
-    instances = map(lambda x: x.instances[0], instances)
     instances = filter(lambda x: x.tags and x.dns_name and all((y in x.tags for y in ('domain_base', 'fqdn', 'deployment'))), instances)
 
     domain_bases = set(x.tags['domain_base'] for x in instances)
