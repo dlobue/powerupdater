@@ -61,7 +61,15 @@ def get_records(name):
     else:
         response = route53.create_hosted_zone(name)
         zone = response['CreateHostedZoneResponse']['HostedZone']
-    return route53.get_all_rrsets(zone['Id'].replace('/hostedzone/', ''))
+
+    zid = zone['Id'].replace('/hostedzone/', '')
+    results = rrsets = route53.get_all_rrsets(zid)
+
+    while rrsets.is_truncated:
+        rrsets = route53.get_all_rrsets(zid, name=rrsets.next_record_name, type=rrsets.next_record_type)
+        results.extend(rrsets)
+
+    return results
 
 
 def delete_record(rrset, record):
