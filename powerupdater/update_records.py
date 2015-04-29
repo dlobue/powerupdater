@@ -128,7 +128,7 @@ def gatherinstances():
 
 
 def process_all(instances):
-    instances = filter(lambda x: x.tags and x.dns_name and all((y in x.tags for y in ('domain_base', 'fqdn', 'deployment'))), instances)
+    instances = filter(lambda x: x.tags and x.dns_name and all((y in x.tags for y in ('domain_base', 'fqdn'))), instances)
 
     domain_bases = set(x.tags['domain_base'] for x in instances)
 
@@ -143,7 +143,8 @@ def process_all(instances):
         process_record(rrset, instance.tags['fqdn'], instance.dns_name)
 
 
-    arrays = filter(lambda x: x.tags['fqdn'].startswith('array-'), instances)
+    arrays = filter(lambda x: x.tags['fqdn'].startswith('array-') and \
+                    all((_ in x.tags for _ in ('deployment', 'type'))), instances)
     array_types = {}
 
     for array_instance in arrays:
@@ -152,11 +153,7 @@ def process_all(instances):
         fqdn = array_instance.tags['fqdn']
         fqdn_base = fqdn[fqdn.index('.'):]
 
-        if 'type' in array_instance.tags:
-            array_type = array_instance.tags['type']
-        else:
-            array_type = fqdn[:fqdn.index('.')][:-3]
-            array_type = array_type.replace('array-','')
+        array_type = array_instance.tags['type']
 
         fqdn_alias = array_type + 'XX' + fqdn_base
 
