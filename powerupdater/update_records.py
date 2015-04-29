@@ -120,8 +120,21 @@ def process_record(rrset, name, value):
     return rrset
 
 def gatherinstances():
+    def _iter_regions(regions):
+        for region in regions:
+            try:
+                yield region.get_all_instances()
+            except boto.exception.EC2ResponseError, e:
+                if e.status == 401 and e.error_code == u'AuthFailure':
+                    # Been getting auth errors eu-central-1. don't have any
+                    # servers there, so skip it if this happens.
+                    logger.debug("Got AuthFailure while trying to list instances in region %s" % region.region.name, exc_info=1)
+                    pass
+                else:
+                    raise
+
     regions = (region.connect() for region in boto.ec2.regions())
-    reservations = (region.get_all_instances() for region in regions)
+    reservations = _iter_regions(regions)
     instances = (reservation.instances for reservation in trampoline(reservations))
 
     return trampoline(instances)
