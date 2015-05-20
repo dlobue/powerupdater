@@ -178,7 +178,7 @@ def process_all(instances):
         for atype,v in atypesdict.iteritems():
             v = sorted(v, key=lambda x: x[1].launch_time)
             for e,(fqdn_alias,array_instance) in enumerate(v):
-                e = str(e+1).zfill(2)
+                e = str(e).zfill(2)
                 fqdn = fqdn_alias.replace('XX', e)
 
                 unseen[array_instance.tags['domain_base']].discard(fqdn)
