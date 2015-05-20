@@ -157,11 +157,11 @@ def process_all(instances):
 
 
     arrays = filter(lambda x: x.tags['fqdn'].startswith('array-') and \
-                    all((_ in x.tags for _ in ('deployment', 'type'))), instances)
+                    all((_ in x.tags for _ in ('environment', 'type'))), instances)
     array_types = {}
 
     for array_instance in arrays:
-        deployment = array_instance.tags['deployment']
+        environment = array_instance.tags['environment']
 
         fqdn = array_instance.tags['fqdn']
         fqdn_base = fqdn[fqdn.index('.'):]
@@ -170,7 +170,7 @@ def process_all(instances):
 
         fqdn_alias = array_type + 'XX' + fqdn_base
 
-        atypedeploy = array_types.setdefault(deployment, {})
+        atypedeploy = array_types.setdefault(environment, {})
         atypes = atypedeploy.setdefault(array_type, [])
         atypes.append((fqdn_alias, array_instance))
 
